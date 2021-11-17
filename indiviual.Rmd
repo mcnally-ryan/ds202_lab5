@@ -1,0 +1,135 @@
+---
+title: "Lab 5"
+author: "Ryan McNally"
+date: "11/17/2021"
+output: html_document
+---
+
+```{r}
+acc <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/accident.csv", stringsAsFactors = FALSE)
+person <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/person.csv", stringsAsFactors = FALSE)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+```
+
+## 1. Fatal Accidents
+```{r}
+fatalities <- person %>% filter(INJ_SEV==4)
+```
+
+## 2. Most Dangerous Manufacturer
+```{r}
+danger <- fatalities %>% group_by(STATE, MAKE) %>%
+  summarise(numfatal = n())
+danger <- danger %>% na.omit() %>%
+  group_by(STATE) %>%
+  filter(numfatal == max(numfatal))
+```
+
+## 3. Most Dangeour Manufacturer by State
+```{r}
+GLC <- readxl::read_xlsx("GLC.xlsx")
+states <- map_data('state')
+GLC$'State Name' <- tolower(GLC$'State Name')
+GLC$'State Code' <- as.numeric(GLC$'State Code')
+labels <- states %>%
+  group_by(region) %>%
+  summarise(long= mean(long, na.rm = TRUE), lat= mean(lat, na.rm = TRUE))
+labels <- left_join(labels, GLC, by = c("region" = "State Name"))
+labels <- left_join(labels, danger, by = c("State Code" = "STATE"))
+labels$MAKE <- factor(labels$MAKE, levels = c(12, 20, 49, 37),
+                      labels = c("Ford", "Chevrolet", "Toyota", "Honda"))
+states %>% ggplot() +
+  geom_polygon( aes(x=long, y=lat, group=group),
+                color="grey", fill="blue" ) + geom_text(data=labels, aes(label =
+                                                                            MAKE, x=long, y=lat), color="black", size=3)
+```
+<br>Here I chose to use the number of accindents in each type of vehicle to dedice what is the most dangerous.
+Just based on this graph, I think tha Chevy is the most dangerous car brand.
+
+## 4. Joining Person and Accidents
+```{r}
+pacc <- person %>% inner_join(acc,by=c("STATE","COUNTY","DAY","MONTH","HOUR","MINUTE"))
+```
+
+## 5. Number of accidents by day, time, and sex.
+```{r}
+pacc %>% group_by(DAY_WEEK) %>% summarise(num_accidents=n()) %>% mutate(day_of_week  = wday(DAY_WEEK, label = TRUE)) %>% 
+  ggplot(aes(x=day_of_week,y=num_accidents)) + geom_bar(stat = "Identity") + ggtitle("Accidents by Day")
+```
+<br> The most accidents happen on the weekends. This logically makes sense as this is when people have the most time off and are traveling aroud more than during the week. 
+
+```{r}
+pacc %>% group_by(HOUR) %>% filter(HOUR<25) %>% summarise(num_accidents=n()) %>% 
+  ggplot(aes(x=HOUR,y=num_accidents)) + geom_bar(stat = "Identity") + ggtitle("Accidents by Hour")
+```
+<br> Most of the accidents happen in the evening hours of the day. This makes sense as people are more tired in the evening and are more likley to have an accident. 
+
+```{r}
+paccF <- pacc %>%  filter(SEX<3)
+paccF %>% mutate(sn = ifelse(paccF$SEX == 1, "male", "female")) %>% group_by(sn)  %>% summarise(num_accidents=n()) %>% 
+  ggplot(aes(x=sn,y=num_accidents)) + geom_bar(stat = "Identity") + ggtitle("Accidents by Sex")
+```
+<br> Here we can see that Males hade more than twice as many accidents. I was surprised at how far apart these totals were, I expected males to have more accidents, but not this many more. I am not sure what factors contributed to these results.
+
+## 6. Map of Deaths by County
+```{r}
+df <- readxl::read_xlsx("GLC.xlsx")
+states <- map_data('state')
+counties <- map_data('county')
+var <- c("STATE", "COUNTY", "FATALS")
+fatals <- acc[var]
+df$'State Code' <- as.numeric(df$`State Code`)
+df$'City Code' <- as.numeric(df$`City Code`)
+df$'County Code' <- as.numeric(df$`County Code`)
+fatals <- fatals %>% group_by(STATE, COUNTY) %>%
+  summarize(FATALS = sum(FATALS))
+fatals <- fatals %>% left_join(df, by=c('COUNTY' = 'County Code', 'STATE' =
+                                                  'State Code'))
+var2 <- c("State Name", "County Name", "FATALS")
+fatals <- fatals[var2]
+fatals <- unique(fatals)
+fatals$`State Name` <- tolower(fatals$`State Name`)
+fatals$`County Name` <- tolower(fatals$`County Name`)
+fatals <- fatals %>% right_join(counties, by=c('County Name' = 'subregion',
+                                                       'State Name' = 'region'))
+ggplot(fatals, aes(x=long, y=lat)) +
+  geom_polygon(aes(group=group)) +
+  geom_polygon(aes(group=group, fill=FATALS))  + ggtitle("Fatalities by County")
+
+```
+<br> It looks like the areas with the highest rate of fatal accidents in the Southwestern US. Rural areas in the Midwest had the least amount of fatal accidents. 
+
+## Winter VS Summer
+```{r}
+Winter <- acc %>%
+  filter(MONTH < 5 | MONTH > 10)
+Summer <- acc %>%
+  filter(MONTH > 5 & MONTH < 10)
+var3 <- c("State Name", "State Code")
+df2 <- df[var3]
+df2 <- unique(df2)
+winterFatal <- Winter %>%
+  group_by(STATE) %>%
+  summarize(FATALS = sum(FATALS))
+summerFatal <- Summer %>%
+  group_by(STATE) %>%
+  summarize(FATALS = sum(FATALS))
+summerFatal <- summerFatal %>% left_join(df2, by=c('STATE' = 'State Code'))
+summerFatal$`State Name` <- tolower(summerFatal$`State Name`)
+summerFatal <- summerFatal %>% right_join(states, by=c('State Name' = 'region'))
+var2 <- c("STATE", "FATALS", "long", "lat", "group")
+summerFatal <- summerFatal[var2]
+ggplot(summerFatal, aes(x=long, y=lat, fill = FATALS)) +
+  geom_polygon(aes(group = group)) +
+  labs(title = "Car Accidents in the Summer by State")  + ggtitle("Summer Accidents by State")
+winterFatal <- winterFatal %>% left_join(df2, by=c('STATE' = 'State Code'))
+winterFatal$`State Name` <- tolower(winterFatal$`State Name`)
+winterFatal <- winterFatal %>% right_join(states, by=c('State Name' = 'region'))
+winterFatal <- winterFatal[var2]
+ggplot(winterFatal, aes(x=long, y=lat, fill = FATALS)) +
+  geom_polygon(aes(group = group)) +
+  labs(title = "Car Accidents in the Winter by State")  + ggtitle("Winter Accidents by State")
+```
+<br> Overall, there are more accidents in the winter than in the summer. California and Texas always have the most accidents. This makes sense as they are the states with the two highest populations. 
